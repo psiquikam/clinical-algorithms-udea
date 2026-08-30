@@ -1,7 +1,7 @@
 
 — Documentación del Repositorio
 🏥 Algoritmos Clínicos en Cuidado Crítico
-Prototipo funcional que formaliza dos algoritmos representativos del cuidado crítico:Manejo del Choque Séptico e Intubación en Secuencia Rápida (RSI).
+Prototipo funcional + simulador ramificado v0.3 que formaliza dos algoritmos representativos del cuidado crítico:Manejo del Choque Séptico e Intubación en Secuencia Rápida (RSI).
 
 Desarrollado como recurso didáctico complementario para el Laboratorio de Simulaciónde la Facultad de Medicina — Universidad de Antioquia.
 
@@ -261,3 +261,72 @@ README — Documentación completa con referencias	✅ Completo
 Programa interactivo — Menú con Rich (colores, tablas)	✅ Completo
 
 Para subir a GitHub, simplemente crea el repositorio, copia la estructura de archivos y ejecuta git push. Los diagramas Mermaid se renderizarán automáticamente en el visor de GitHub.
+## 🧑‍⚕️ Simulador de decisiones clínicas
+
+La versión web añade una capa de simulación educativa sobre el motor clínico existente.
+
+### Ejecutar la interfaz web
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+Luego abrir en el navegador:
+
+```text
+http://127.0.0.1:5000
+```
+
+La actividad registra en el navegador la decisión, el tiempo empleado, si coincide con la decisión esperada del escenario y una consecuencia educativa. Esta primera versión implementa un escenario de choque séptico y está preparada para ampliar el mismo patrón a RSI y a nuevos escenarios.
+
+> Nota: esta interfaz es un prototipo didáctico. La decisión esperada se deriva del algoritmo implementado en este repositorio y, en esta versión, conserva la referencia clínica declarada por el prototipo (SSC 2021). Debe verificarse contra guías vigentes y protocolos institucionales antes de usarla en enseñanza clínica formal.
+
+## 🌐 Interfaz web de simulación
+
+La versión web convierte el prototipo CLI en una actividad de decisión clínica ejecutable desde el navegador, sin requerir Flask ni un framework adicional.
+
+### Ejecutar
+
+```bash
+python app.py
+```
+
+Abrir:
+
+```text
+http://127.0.0.1:8000
+```
+
+La primera actividad implementada es un escenario de choque séptico. El estudiante selecciona una decisión, el sistema mide el tiempo empleado, compara la opción con la decisión esperada configurada para el escenario, muestra la consecuencia educativa y deja un registro visible de la sesión.
+
+## Release v0.2 — Simulador web
+
+- Interfaz web local sin framework adicional.
+- Escenario inicial: choque séptico.
+- Decisión del estudiante.
+- Temporizador de decisión.
+- Comparación con decisión esperada del prototipo.
+- Consecuencia y retroalimentación educativa.
+- Registro visible de la sesión.
+- 24 pruebas automatizadas pasan.
+
+## Simulador ramificado v0.3
+
+La versión 0.3 transforma el motor CLI en una experiencia educativa local basada en nodos de decisión. El estudiante selecciona una intervención, el sistema registra la decisión y el tiempo, aplica una consecuencia educativa y actualiza un estado fisiológico simulado antes de avanzar al siguiente nodo.
+
+### Ejecutar
+
+```bash
+python app.py
+```
+
+Abrir: `http://127.0.0.1:8000`
+
+La sesión queda registrada mientras el servidor está activo. El escenario de choque séptico utiliza los datos del caso simulado existente y conserva la base clínica declarada por el prototipo; la capa de ramificación es didáctica y no pretende predecir la evolución de un paciente real.
+
+### Pruebas
+
+```bash
+python -m pytest tests/ -v
+```

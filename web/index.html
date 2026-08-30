@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Algoritmos Clínicos UdeA — Simulador v0.3</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar"><div><div class="eyebrow">LABORATORIO DE SIMULACIÓN · UdeA</div><h1>Algoritmos Clínicos en Cuidado Crítico</h1><p>Simulador ramificado de decisiones clínicas</p></div><span class="badge">v0.3 · EDUCATIVO</span></header>
+<main class="layout">
+<section class="card scenario"><div class="title"><span>01</span><h2>Escenario</h2></div><p class="scenario-text">Paciente adulto con sospecha de infección abdominal y datos de hipoperfusión.</p><div class="patient-grid" id="patient-grid"></div><div class="statusbar"><span id="session-status">Sesión: iniciando…</span><span>Fase: <b id="phase">—</b></span></div></section>
+<section class="card decision"><div class="title"><span>02</span><h2 id="node-title">Decisión clínica</h2><div class="timer" id="timer">00:00</div></div><div class="node-progress" id="progress"></div><p class="question" id="question">Cargando…</p><div class="choices" id="choices"></div><button class="secondary" id="restart">Reiniciar simulación</button></section>
+<section class="card physiology"><div class="title"><span>03</span><h2>Estado fisiológico simulado</h2></div><div class="vitals"><div><strong>PAM</strong><span id="pam">—</span><small>mmHg</small></div><div><strong>Lactato</strong><span id="lactato">—</span><small>mmol/L</small></div><div><strong>Puntaje</strong><span id="score">0</span><small>puntos</small></div><div><strong>Retraso</strong><span id="delay">0</span><small>min</small></div></div><p class="muted">El cambio fisiológico es una representación educativa del escenario, no una predicción clínica.</p></section>
+<section class="card feedback"><div class="title"><span>04</span><h2>Retroalimentación</h2></div><div id="feedback-content" class="muted">Selecciona una alternativa.</div></section>
+<section class="card trace"><div class="title"><span>05</span><h2>Registro de decisiones</h2></div><div id="trace-list" class="trace-list"><div class="muted">Aún no hay decisiones registradas.</div></div></section>
+<section class="card completion hidden" id="completion"><div class="title"><span>06</span><h2>Debriefing</h2></div><div id="completion-content"></div></section>
+</main>
+<footer>Recurso didáctico. No reemplaza el juicio clínico, protocolos institucionales ni guías vigentes. Las reglas clínicas corresponden a la base declarada por este prototipo y deben revisarse antes de uso académico formal.</footer>
+<script src="app.js"></script>
+</body></html>
