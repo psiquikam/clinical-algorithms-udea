@@ -330,3 +330,104 @@ La sesión queda registrada mientras el servidor está activo. El escenario de c
 ```bash
 python -m pytest tests/ -v
 ```
+
+
+## v0.4 — Sala de reanimación interactiva
+
+La interfaz web evoluciona hacia una experiencia de simulación clínica: el estudiante observa un
+paciente virtual, consulta el monitor, selecciona intervenciones y observa cambios fisiológicos
+simulados antes de volver a decidir. La actividad registra la trayectoria de decisiones y ofrece un
+debriefing final.
+
+### Ejecutar la interfaz
+
+```bash
+python app.py
+```
+
+Después abrir:
+
+http://127.0.0.1:8000
+
+### Nota de identidad institucional
+
+La interfaz utiliza una paleta visual inspirada en la identidad de la Universidad de Antioquia.
+El logosímbolo oficial no se redistribuye en este prototipo. Su incorporación formal deberá seguir
+el Manual de Identidad Institucional y las autorizaciones aplicables.
+
+### Nota de seguridad pedagógica
+
+Los cambios de signos vitales y demás respuestas del paciente son **simulaciones educativas**.
+No constituyen recomendaciones para atención de pacientes ni sustituyen guías clínicas, supervisión
+docente o juicio profesional.
+
+
+\n## v0.4.1 — Corrección de recursos estáticos\n\n
+Corrección del enrutamiento de `app.py` para servir correctamente `web/style.css` y `web/app.js`.
+Incluye una prueba de regresión para evitar que los recursos estáticos vuelvan a resolverse como
+`web/web/...`.\n\n
+
+
+## v0.6 — Sala virtual de reanimación
+
+La interfaz incorpora una escenografía 2D de sala de reanimación, paciente virtual, monitor multiparámetro, equipo interactivo, eventos del escenario, controles de pausa/sonido, trayectoria de decisiones y debriefing. Los sonidos se sintetizan localmente con Web Audio API; no se requieren archivos de audio externos.
+
+**Nota:** la escenografía, animaciones, eventos y respuestas fisiológicas son simulaciones educativas. No representan una sala clínica específica ni predicen la respuesta de un paciente real.
+
+
+## v0.7 — Sala de reanimación inmersiva
+
+La interfaz incorpora una capa audiovisual sintética para reforzar la inmersión: monitor ECG
+animado, sonido cardiaco sincronizado de forma aproximada con la frecuencia simulada, alarmas
+sintéticas ante inestabilidad, ambiente de sala opcional y mensajes del equipo con voz del navegador
+cuando esté disponible.
+
+### Activar audio
+
+Los navegadores modernos suelen bloquear el audio automático. Abre el botón **Audio**, pulsa
+**Activar sonido** y configura volumen, monitor, ambiente, alarmas y voz del equipo.
+
+### Alcance
+
+Los sonidos no son grabaciones clínicas ni pretenden reproducir fielmente un monitor comercial.
+Son una representación sonora sintética para simulación educativa. La fisiología mostrada también
+es simulada y no predictiva.
+
+
+## v0.8 — Cierre de caso, eventos estructurados y más alertas de voz
+
+Esta versión perfecciona el manejo del caso desde el evento inicial hasta su cierre, y amplía
+las alertas habladas del equipo.
+
+### Eventos del escenario, tipados y con voz
+
+Cada evento del escenario ahora tiene un **tipo** (`nursing`, `labs`, `clinical`, `deterioration`,
+`closure`), un **título** visible y un **texto**, en lugar de un texto plano genérico. Esto corrige
+la inconsistencia previa entre los tiempos programados en el backend y los que realmente disparaba
+la interfaz. Ejemplos incluidos en la línea de tiempo del caso:
+
+- **Aviso de enfermería** — "La paciente está más fría y responde más lentamente."
+- **Resultados disponibles** — "Se liberan nuevos datos de laboratorio."
+- **Evento clínico** — "Aparece dolor abdominal intenso."
+- **Deterioro** — "Persiste la inestabilidad y el equipo debe escalar."
+
+Cada evento se anuncia con voz del navegador (cuando está activada) además de quedar registrado
+en el panel de "Eventos y equipo".
+
+### Manejo del caso hasta su cierre
+
+El backend evalúa continuamente el estado del caso (`en_curso`, `listo_para_cierre`,
+`escalamiento_requerido`) según la tendencia fisiológica y si se activó el control del foco
+infeccioso. El primer cambio de estado dispara una alerta puntual (visual y de voz) para no
+repetirse en cada acción posterior. Un indicador de estado del caso se muestra junto a las
+etiquetas clínicas de la sala.
+
+Al finalizar la simulación, el debriefing incluye un **desenlace** (`Favorable`, `Adverso` o
+`Incompleto`) y una **narrativa de cierre** que explica el motivo, en lugar de solo mostrar
+cifras del resumen.
+
+### Nota de seguridad pedagógica
+
+La clasificación de desenlace es una simulación educativa basada en umbrales del propio motor
+didáctico. No constituye un criterio clínico de cierre de caso real ni sustituye la valoración
+del equipo tratante ni las guías vigentes.

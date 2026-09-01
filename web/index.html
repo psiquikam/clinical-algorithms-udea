@@ -1,20 +1,175 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Algoritmos Clínicos UdeA — Simulador v0.3</title>
-<link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Algoritmos Clínicos en Cuidado Crítico · UdeA</title>
+<link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
-<header class="topbar"><div><div class="eyebrow">LABORATORIO DE SIMULACIÓN · UdeA</div><h1>Algoritmos Clínicos en Cuidado Crítico</h1><p>Simulador ramificado de decisiones clínicas</p></div><span class="badge">v0.3 · EDUCATIVO</span></header>
-<main class="layout">
-<section class="card scenario"><div class="title"><span>01</span><h2>Escenario</h2></div><p class="scenario-text">Paciente adulto con sospecha de infección abdominal y datos de hipoperfusión.</p><div class="patient-grid" id="patient-grid"></div><div class="statusbar"><span id="session-status">Sesión: iniciando…</span><span>Fase: <b id="phase">—</b></span></div></section>
-<section class="card decision"><div class="title"><span>02</span><h2 id="node-title">Decisión clínica</h2><div class="timer" id="timer">00:00</div></div><div class="node-progress" id="progress"></div><p class="question" id="question">Cargando…</p><div class="choices" id="choices"></div><button class="secondary" id="restart">Reiniciar simulación</button></section>
-<section class="card physiology"><div class="title"><span>03</span><h2>Estado fisiológico simulado</h2></div><div class="vitals"><div><strong>PAM</strong><span id="pam">—</span><small>mmHg</small></div><div><strong>Lactato</strong><span id="lactato">—</span><small>mmol/L</small></div><div><strong>Puntaje</strong><span id="score">0</span><small>puntos</small></div><div><strong>Retraso</strong><span id="delay">0</span><small>min</small></div></div><p class="muted">El cambio fisiológico es una representación educativa del escenario, no una predicción clínica.</p></section>
-<section class="card feedback"><div class="title"><span>04</span><h2>Retroalimentación</h2></div><div id="feedback-content" class="muted">Selecciona una alternativa.</div></section>
-<section class="card trace"><div class="title"><span>05</span><h2>Registro de decisiones</h2></div><div id="trace-list" class="trace-list"><div class="muted">Aún no hay decisiones registradas.</div></div></section>
-<section class="card completion hidden" id="completion"><div class="title"><span>06</span><h2>Debriefing</h2></div><div id="completion-content"></div></section>
+<div class="app-shell">
+<header class="topbar">
+  <div class="identity">
+    <div class="udea-badge">UdeA</div>
+    <div>
+      <div class="eyebrow">UNIVERSIDAD DE ANTIOQUIA · FACULTAD DE MEDICINA</div>
+      <h1>Laboratorio de Simulación · Algoritmos Clínicos en Cuidado Crítico</h1>
+      <div class="sub">Sala virtual de reanimación · Simulación de decisiones clínicas</div>
+    </div>
+  </div>
+  <div class="top-controls">
+    <span id="simState" class="status active">● SIMULACIÓN ACTIVA</span>
+    <span id="simTimer" class="timer">00:00</span>
+    <button id="soundBtn" class="topbtn" aria-pressed="false">🔇 Audio</button>
+    <button id="pauseBtn" class="topbtn">⏸ Pausar</button>
+    <button id="finishBtn" class="topbtn danger">■ Finalizar</button>
+  </div>
+</header>
+
+<div id="audioPanel" class="audio-panel hidden" aria-label="Controles de sonido">
+  <div><strong>Diseño sonoro</strong><span>Audio sintético educativo</span></div>
+  <label>Volumen <input id="volumeRange" type="range" min="0" max="100" value="40"></label>
+  <label><input id="monitorSound" type="checkbox" checked> Monitor cardíaco</label>
+  <label><input id="ambientSound" type="checkbox"> Ambiente de sala</label>
+  <label><input id="alarmSound" type="checkbox" checked> Alarmas clínicas</label>
+  <label><input id="voiceSound" type="checkbox"> Voz del equipo</label>
+  <button id="audioEnable" class="audio-enable">▶ Activar sonido</button>
+</div>
+
+<main class="workspace">
+<section class="room" aria-label="Sala virtual de reanimación">
+  <h2 class="sr-only">Paciente virtual</h2>
+  <div class="room-scene">
+    <div class="room-sign">SALA DE REANIMACIÓN 1 · SIMULACIÓN</div>
+    <div class="ceiling-light one"></div><div class="ceiling-light two"></div><div class="ceiling-light three"></div>
+    <div class="wall-unit"></div><div class="wall-outlet o1"></div><div class="wall-outlet o2"></div><div class="wall-outlet o3"></div>
+    <div class="room-clock" id="roomClock">11:23</div>
+    <div class="window-frame"><div class="window-reflection"></div></div>
+    <div class="wall-screen small-screen"><div class="screen-line"></div><div class="screen-line"></div><div class="screen-line"></div></div>
+
+    <div class="patient-bed" id="patientHotspot" title="Paciente: clic para examen físico">
+      <div class="bed-head"></div><div class="mattress"></div><div class="pillow"></div>
+      <div class="patient-body" id="patientBody">
+        <div class="patient-head"></div><div class="patient-neck"></div>
+        <div class="patient-torso"><span class="lung l"></span><span class="lung r"></span></div>
+        <div class="patient-arm left"></div><div class="patient-arm right"></div>
+        <div class="patient-leg left"></div><div class="patient-leg right"></div>
+        <div class="oxygen-mask">O₂</div><div class="pulse-dot"></div>
+      </div>
+      <div class="bed-rail left"></div><div class="bed-rail right"></div>
+    </div>
+
+    <div class="iv-pole hotspot" id="ivHotspot" title="Acceso vascular / infusión"><div class="pole"></div><div class="bag"></div><div class="hook"></div><div class="drip-dot"></div></div>
+    <div class="monitor-cart hotspot" id="monitorHotspot" title="Monitor multiparámetro">
+      <div class="monitor-head"></div>
+      <div class="monitor-screen">
+        <svg viewBox="0 0 260 110" preserveAspectRatio="none">
+          <polyline id="ecgWave" points="0,72 20,72 24,72 30,30 36,92 44,72 62,72 72,72 78,40 84,86 92,72 112,72 120,72 126,32 132,92 140,72 160,72 168,72 174,36 180,88 188,72 208,72 216,72 222,32 228,92 236,72 260,72" />
+        </svg>
+        <div class="screen-readout"><span>FC</span><b id="sceneFc">125</b></div>
+      </div>
+      <div class="monitor-base"></div>
+    </div>
+
+    <div class="crash-cart hotspot" id="cartHotspot" title="Carro de paro"><div class="cart-top"></div><div class="cart-body"></div><div class="drawer d1"></div><div class="drawer d2"></div><div class="drawer d3"></div><div class="cart-wheel a"></div><div class="cart-wheel b"></div></div>
+    <div class="oxygen-source hotspot" id="oxygenHotspot" title="Fuente de oxígeno"><div class="tank"></div><div class="regulator"></div></div>
+    <div class="suction-unit hotspot" id="suctionHotspot" title="Aspiración"><div class="suction"></div><div class="jar"></div></div>
+    <div class="ventilator hotspot" id="ventilatorHotspot" title="Ventilador mecánico"><div class="vent-screen"><span>PSV</span><b id="ventRate">18</b></div><div class="vent-body"></div></div>
+
+    <div class="scene-overlay">
+      <div class="scene-chip"><span>CASO SIMULADO</span><strong>María G. · 65 años</strong></div>
+      <div class="scene-chip danger-chip"><span>ALERGIA</span><strong>Penicilina</strong></div>
+    </div>
+
+    <div class="monitor-panel">
+      <div class="panel-head"><span>MONITOR MULTIPARÁMETRO</span><span class="live">● LIVE</span></div>
+      <div class="vital-grid">
+        <div class="vital"><span>FC</span><b id="fc">125</b><small>lpm</small></div>
+        <div class="vital"><span>PA</span><b id="bp">78/45</b><small>mmHg</small></div>
+        <div class="vital"><span>SpO₂</span><b id="spo2">88</b><small>%</small></div>
+        <div class="vital"><span>FR</span><b id="rr">28</b><small>rpm</small></div>
+        <div class="vital"><span>PAM</span><b id="map">56</b><small>mmHg</small></div>
+        <div class="vital"><span>Lactato</span><b id="lactate">4.8</b><small>mmol/L</small></div>
+      </div>
+      <div class="mini-trend">
+        <div class="trend-label">Tendencia simulada · 10 min</div>
+        <svg viewBox="0 0 300 80" preserveAspectRatio="none">
+          <polyline id="trendPathMap" points="0,58 40,55 80,56 120,52 160,48 200,45 240,40 300,35"/>
+          <polyline id="trendPathLactate" points="0,30 40,34 80,33 120,38 160,40 200,44 240,48 300,52"/>
+        </svg>
+      </div>
+      <div class="alarm-light" id="alarmLight"><span>!</span><b id="alarmLabel">PAM baja</b></div>
+    </div>
+
+    <div class="event-banner" id="eventBanner"><span class="event-icon">⚠</span><div><strong id="eventTitle">Evento del escenario</strong><span id="eventText">La paciente está somnolienta y responde a la voz.</span></div></div>
+    <div id="voiceBubble" class="voice-bubble hidden"><span class="voice-icon">🔊</span><div><strong id="voiceSource">Enfermería</strong><span id="voiceText">La presión continúa baja.</span></div></div>
+  </div>
+
+  <div class="patient-status-bar">
+    <div class="status-person"><span class="status-dot" id="stateDot"></span><div><strong id="patientState">Somnolienta · responde a la voz</strong><small id="respState">Respiración rápida · hipoxemia</small></div></div>
+    <div class="clinical-tags"><span id="hemoTag">Hipotensión</span><span id="perfTag">Hipoperfusión</span><span id="severityTag" class="critical">CRÍTICO</span><span id="caseStatusTag">Caso en curso</span></div>
+  </div>
+</section>
+
+<section class="control-grid">
+  <article class="card action-card">
+    <div class="section-head">
+      <div><div class="eyebrow small">DECISIONES CLÍNICAS</div><h2>Gestiona al paciente</h2><p>Observa → solicita información → interviene → espera la respuesta → reevalúa.</p></div>
+      <div id="nodeLabel" class="node">Inicio</div>
+    </div>
+    <div class="action-tabs">
+      <button class="action-tab active" data-cat="observe">👁 Observar</button>
+      <button class="action-tab" data-cat="investigate">🧪 Solicitar información</button>
+      <button class="action-tab" data-cat="intervene">💉 Intervenir</button>
+      <button class="action-tab" data-cat="reassess">↻ Reevaluar</button>
+    </div>
+    <div id="actions" class="action-grid"></div>
+    <div class="action-tip"><span>💡</span><span>Las respuestas fisiológicas son simuladas y tienen finalidad educativa. No son predicciones clínicas.</span></div>
+  </article>
+
+  <aside class="right-stack">
+    <article class="card event-card">
+      <div class="section-head"><h2>Eventos y equipo</h2><button id="clearEvent" class="linkbtn">Limpiar</button></div>
+      <div id="eventLog" class="event-log"></div>
+    </article>
+    <article class="card voice-card">
+      <div class="section-head"><h2>Voz en sala</h2><button id="clearVoice" class="linkbtn">Limpiar</button></div>
+      <div id="voiceLog" class="voice-log"></div>
+    </article>
+    <article class="card info-card">
+      <div class="section-head"><h2>Información clínica</h2><button id="toggleInfo" class="linkbtn">Mostrar</button></div>
+      <div id="infoList" class="info-list hidden"></div>
+    </article>
+    <article class="card trajectory-card">
+      <div class="section-head"><h2>Trayectoria clínica</h2><span id="score" class="score">0 pts</span></div>
+      <div id="timeline" class="timeline"><div class="empty">Sin decisiones registradas.</div></div>
+      <button id="viewDebrief" class="wide secondary hidden">Ver debriefing</button>
+    </article>
+  </aside>
+</section>
+
+<section class="bottom-grid">
+  <article class="card objective-card"><div class="eyebrow small">OBJETIVO DEL CASO</div><h2>Estabilizar, reevaluar y escalar</h2><p>Gestiona el deterioro fisiológico, solicita información relevante, interviene y reconoce cambios en la trayectoria.</p></article>
+  <article class="card tools-card">
+    <div class="section-head"><div><div class="eyebrow small">ENTORNO INTERACTIVO</div><h2>Explora la sala</h2></div><span class="room-hint">Haz clic sobre los equipos</span></div>
+    <div class="tool-row">
+      <button class="room-tool" data-hotspot="patientHotspot">🩺 Examen físico</button>
+      <button class="room-tool" data-hotspot="monitorHotspot">📈 Monitor</button>
+      <button class="room-tool" data-hotspot="ivHotspot">💧 Acceso IV</button>
+      <button class="room-tool" data-hotspot="cartHotspot">🧰 Carro de paro</button>
+      <button class="room-tool" data-hotspot="oxygenHotspot">🫁 Oxígeno</button>
+      <button class="room-tool" data-hotspot="suctionHotspot">🫧 Aspiración</button>
+      <button class="room-tool" data-hotspot="ventilatorHotspot">🌬 Ventilador</button>
+    </div>
+  </article>
+  <article class="card debrief-card hidden" id="debrief">
+    <div class="section-head"><h2>Debriefing</h2><span class="phase">Fin de sesión</span></div>
+    <div id="debriefBody"></div>
+  </article>
+</section>
 </main>
-<footer>Recurso didáctico. No reemplaza el juicio clínico, protocolos institucionales ni guías vigentes. Las reglas clínicas corresponden a la base declarada por este prototipo y deben revisarse antes de uso académico formal.</footer>
-<script src="app.js"></script>
-</body></html>
+<footer class="footer">Prototipo educativo · Fisiología y sonidos simulados · No sustituye juicio clínico ni protocolos institucionales · v0.9</footer>
+</div>
+<script src="/web/app.js"></script>
+</body>
+</html>
