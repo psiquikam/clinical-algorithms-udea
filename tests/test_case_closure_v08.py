@@ -45,10 +45,25 @@ def test_evaluate_case_stable_and_source_controlled_is_ready_for_closure():
     state = start_session()
     state["physiology"]["map"] = 70
     state["physiology"]["lactate"] = 2.0
+    state["cultures_done"] = True
+    state["antibiotic_given"] = True
     state["source_control_done"] = True
     status, message = evaluate_case(state)
     assert status == "listo_para_cierre"
     assert message
+
+
+def test_evaluate_case_stable_without_full_bundle_is_not_ready_for_closure():
+    """La PAM y el lactato en meta NO bastan: si falta un paso real del bundle
+    (cultivos, antibiótico o control del foco) el caso no puede cerrarse como
+    favorable — así se evita que 'apretar cualquier botón' cierre el caso."""
+    state = start_session()
+    state["physiology"]["map"] = 70
+    state["physiology"]["lactate"] = 2.0
+    state["source_control_done"] = True
+    # cultures_done y antibiotic_given quedan en False (valor por defecto)
+    status, message = evaluate_case(state)
+    assert status != "listo_para_cierre"
 
 
 def test_evaluate_case_prolonged_instability_requires_escalation():
@@ -71,6 +86,9 @@ def test_apply_action_emits_closure_alert_once():
     state = start_session()
     state["physiology"]["map"] = 66
     state["physiology"]["lactate"] = 2.0
+    state["iv_access"] = True
+    state["cultures_done"] = True
+    state["antibiotic_given"] = True
     r = apply_action(state, "source_control", 5)
     assert any(a["type"] == "closure" for a in r["alerts"])
     assert state["case_status"] == "listo_para_cierre"
@@ -83,11 +101,23 @@ def test_build_debrief_reports_outcome_and_narrative():
     state = start_session()
     state["physiology"]["map"] = 70
     state["physiology"]["lactate"] = 2.0
+    state["cultures_done"] = True
+    state["antibiotic_given"] = True
     state["source_control_done"] = True
     debrief = build_debrief(state)
     assert debrief["outcome"] == "Favorable"
     assert debrief["case_status"] == "listo_para_cierre"
     assert debrief["closure_narrative"]
+
+
+def test_build_debrief_incomplete_lists_missing_bundle_steps():
+    state = start_session()
+    state["physiology"]["map"] = 70
+    state["physiology"]["lactate"] = 2.0
+    # No se completan cultivos, antibiótico ni control del foco.
+    debrief = build_debrief(state)
+    assert debrief["outcome"] == "Incompleto"
+    assert "hemocultivos" in debrief["closure_narrative"]
 
 
 def test_build_debrief_adverse_outcome():

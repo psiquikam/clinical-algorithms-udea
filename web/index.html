@@ -7,6 +7,105 @@
 <link rel="stylesheet" href="/web/style.css">
 </head>
 <body>
+<div id="onboarding" class="onboarding" role="dialog" aria-modal="true" aria-label="Bienvenida al simulador">
+
+  <header class="onb-brand">
+    <div class="udea-badge">UdeA</div>
+    <div>
+      <div class="eyebrow">UNIVERSIDAD DE ANTIOQUIA · FACULTAD DE MEDICINA</div>
+      <h1>Laboratorio de Simulación · Algoritmos Clínicos en Cuidado Crítico</h1>
+      <div class="sub">Sala virtual de reanimación · Simulación de decisiones clínicas</div>
+    </div>
+  </header>
+
+  <section class="onb-step" id="onbStep1" data-step="1">
+    <div class="onb-card">
+      <div class="onb-eyebrow">¿QUÉ ES ESTE PROYECTO?</div>
+      <p class="onb-lead">Un prototipo de simulación clínica digital con finalidad educativa: explora la toma de decisiones en escenarios de cuidado crítico mediante un paciente virtual, monitorización fisiológica simulada, eventos temporales, resultados clínicos progresivos, intervenciones y retroalimentación.</p>
+
+      <div class="onb-status-badge">Prototipo funcional en desarrollo</div>
+      <p class="onb-fine">La existencia de pruebas automatizadas de software no implica por sí misma validación clínica de las reglas utilizadas en los escenarios.</p>
+
+      <div class="onb-grid">
+        <div>
+          <h3>Intención pedagógica</h3>
+          <p>Favorecer el razonamiento clínico dinámico: observar, solicitar información, decidir intervenciones, reevaluar y sostener la secuencia correcta de un protocolo real, no solo "acertar" botones sueltos.</p>
+        </div>
+        <div>
+          <h3>Uso previsto</h3>
+          <p>Enseñanza, aprendizaje, discusión, preparación, simulación clínica supervisada, reflexión y debriefing. <strong>No</strong> reemplaza la formación clínica presencial ni la simulación de alta fidelidad.</p>
+        </div>
+      </div>
+
+      <details class="onb-details">
+        <summary>Esta propuesta académica</summary>
+        <p>Este recurso se desarrolla como componente digital de una propuesta de modalidad alternativa para el aprendizaje de Paciente Crítico. Busca complementar la formación, pero <strong>no sustituye</strong> a los docentes, la práctica clínica, la simulación presencial, la supervisión ni las experiencias hospitalarias.</p>
+      </details>
+      <details class="onb-details">
+        <summary>Accesibilidad y diversidad en el aprendizaje</summary>
+        <p>El recurso incorpora características que pueden ofrecer una vía complementaria de preparación y ensayo para estudiantes con diferentes necesidades de aprendizaje y participación, incluyendo mayores demandas sensoriales, cognitivas, sociales o comunicativas.</p>
+        <p>Una modalidad digital individual puede constituir una capa preparatoria que permita familiarizarse con determinadas secuencias de razonamiento y demandas del entorno clínico antes de afrontar actividades presenciales con mayores exigencias sociales. El entorno permite ensayar decisiones, observar consecuencias simuladas y repetir el escenario sin exposición pública del desempeño individual ante un grupo. Esto constituye una característica del entorno de aprendizaje, no una intervención clínica.</p>
+      </details>
+
+      <div class="onb-actions"><button id="onbToStep2" class="onb-primary">Continuar</button></div>
+    </div>
+  </section>
+
+  <section class="onb-step hidden" id="onbStep2" data-step="2">
+    <div class="onb-card">
+      <div class="onb-warn-box">
+        <strong>AVISO DE USO EDUCATIVO</strong>
+        <p>Este simulador es exclusivamente educativo. El contenido, los datos fisiológicos, los resultados, las respuestas del paciente, los tiempos y los eventos presentados son simulados y están diseñados para fines de aprendizaje.</p>
+        <p>No constituye una herramienta de diagnóstico, tratamiento, monitorización ni apoyo autónomo a decisiones clínicas en pacientes reales.</p>
+        <p>No debe utilizarse para orientar la atención de una persona real ni para sustituir el juicio clínico, las guías vigentes, los protocolos institucionales o la supervisión profesional.</p>
+      </div>
+      <label class="onb-check"><input type="checkbox" id="onbAccept"> Comprendo que este recurso es una simulación educativa y no una herramienta para atención clínica real.</label>
+      <div class="onb-actions">
+        <button id="onbBack2" class="onb-secondary">Atrás</button>
+        <button id="onbToStep3" class="onb-primary" disabled>ENTRAR A LA EXPERIENCIA</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="onb-step hidden" id="onbStep3" data-step="3">
+    <div class="onb-card onb-card-wide">
+      <h2>Configuración de la experiencia</h2>
+      <p class="onb-lead">Todo viene activado con valores recomendados por defecto. Es opcional ajustarlo; puedes continuar sin cambiar nada.</p>
+      <div class="onb-config-grid">
+        <div class="onb-config-group">
+          <h3>Audio</h3>
+          <label><input type="checkbox" id="cfgMonitor" checked> Monitor cardíaco</label>
+          <label><input type="checkbox" id="cfgAmbient" checked> Ambiente de sala</label>
+          <label><input type="checkbox" id="cfgAlarm" checked> Alarmas clínicas</label>
+          <label><input type="checkbox" id="cfgVoice" checked> Voz en sala (enfermería, laboratorio, equipo, monitor)</label>
+        </div>
+        <div class="onb-config-group">
+          <h3>Visual</h3>
+          <label><input type="checkbox" id="cfgSubtitles" checked> Mostrar texto además de reproducir la voz</label>
+          <label><input type="checkbox" id="cfgContrast"> Alto contraste</label>
+          <label><input type="checkbox" id="cfgTextLg"> Texto más grande</label>
+        </div>
+        <div class="onb-config-group">
+          <h3>Modo de simulación</h3>
+          <label><input type="radio" name="cfgMode" value="prep"> Preparación · orientación más frecuente</label>
+          <label><input type="radio" name="cfgMode" value="standard" checked> Estándar</label>
+          <label><input type="radio" name="cfgMode" value="advanced"> Avanzado · orientación más espaciada</label>
+        </div>
+        <div class="onb-config-group">
+          <h3>Pausa</h3>
+          <label><input type="checkbox" id="cfgPause" checked> Permitir pausar la simulación</label>
+        </div>
+      </div>
+      <div class="onb-actions">
+        <button id="onbBack3" class="onb-secondary">Atrás</button>
+        <button id="onbSkip" class="onb-secondary">Continuar con valores por defecto</button>
+        <button id="onbFinish" class="onb-primary">Guardar y entrar a la sala</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
 <div class="app-shell">
 <header class="topbar">
   <div class="identity">
@@ -20,20 +119,22 @@
   <div class="top-controls">
     <span id="simState" class="status active">● SIMULACIÓN ACTIVA</span>
     <span id="simTimer" class="timer">00:00</span>
-    <button id="soundBtn" class="topbtn" aria-pressed="false">🔇 Audio</button>
+    <button id="soundBtn" class="topbtn" aria-pressed="true">🔊 Audio activo</button>
     <button id="pauseBtn" class="topbtn">⏸ Pausar</button>
     <button id="finishBtn" class="topbtn danger">■ Finalizar</button>
   </div>
 </header>
 
+<div id="audioUnlockHint" class="audio-hint">🔈 Sonido y voz activados por defecto — se inician automáticamente con tu primer clic en la pantalla (así lo exige el navegador). No necesitas activar nada manualmente.</div>
+
 <div id="audioPanel" class="audio-panel hidden" aria-label="Controles de sonido">
-  <div><strong>Diseño sonoro</strong><span>Audio sintético educativo</span></div>
-  <label>Volumen <input id="volumeRange" type="range" min="0" max="100" value="40"></label>
+  <div><strong>Diseño sonoro</strong><span>Activado por defecto · ajusta o silencia aquí si lo necesitas</span></div>
+  <label>Volumen <input id="volumeRange" type="range" min="0" max="100" value="55"></label>
   <label><input id="monitorSound" type="checkbox" checked> Monitor cardíaco</label>
-  <label><input id="ambientSound" type="checkbox"> Ambiente de sala</label>
+  <label><input id="ambientSound" type="checkbox" checked> Ambiente de sala</label>
   <label><input id="alarmSound" type="checkbox" checked> Alarmas clínicas</label>
-  <label><input id="voiceSound" type="checkbox"> Voz del equipo</label>
-  <button id="audioEnable" class="audio-enable">▶ Activar sonido</button>
+  <label><input id="voiceSound" type="checkbox" checked> Voz en sala (enfermería, laboratorio, equipo, monitor)</label>
+  <button id="audioEnable" class="audio-enable">🔇 Silenciar todo</button>
 </div>
 
 <main class="workspace">
@@ -102,6 +203,7 @@
     </div>
 
     <div class="event-banner" id="eventBanner"><span class="event-icon">⚠</span><div><strong id="eventTitle">Evento del escenario</strong><span id="eventText">La paciente está somnolienta y responde a la voz.</span></div></div>
+    <div id="arrestBanner" class="arrest-banner hidden">🚨 PARO CARDIORRESPIRATORIO · SIN PULSO — inicia RCP y adrenalina ya</div>
     <div id="voiceBubble" class="voice-bubble hidden"><span class="voice-icon">🔊</span><div><strong id="voiceSource">Enfermería</strong><span id="voiceText">La presión continúa baja.</span></div></div>
   </div>
 
@@ -122,6 +224,7 @@
       <button class="action-tab" data-cat="investigate">🧪 Solicitar información</button>
       <button class="action-tab" data-cat="intervene">💉 Intervenir</button>
       <button class="action-tab" data-cat="reassess">↻ Reevaluar</button>
+      <button class="action-tab emergency-tab hidden" id="emergencyTab" data-cat="emergency">🚨 Emergencia</button>
     </div>
     <div id="actions" class="action-grid"></div>
     <div class="action-tip"><span>💡</span><span>Las respuestas fisiológicas son simuladas y tienen finalidad educativa. No son predicciones clínicas.</span></div>

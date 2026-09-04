@@ -58,16 +58,20 @@ ACTIONS = {
     ],
     "intervene": [
         ("oxygen","Administrar oxígeno","Soporte de oxigenación"),
-        ("iv","Obtener acceso IV","Permite muestras y tratamiento"),
-        ("antibiotic","Administrar antibiótico empírico","Tratamiento antimicrobiano temprano"),
-        ("fluids","Iniciar cristaloides","Reanimación con reevaluación"),
-        ("vasopressor","Iniciar norepinefrina","Escalamiento hemodinámico"),
-        ("source_control","Activar control del foco","Buscar y tratar la fuente"),
+        ("iv","Obtener acceso IV","Requisito previo a fármacos y líquidos"),
+        ("antibiotic","Administrar antibiótico empírico","Requiere IV; idealmente después de hemocultivos"),
+        ("fluids","Iniciar cristaloides","Requiere IV; bolo de 500 mL, meta ≈30 mL/kg"),
+        ("vasopressor","Iniciar norepinefrina","Requiere IV y al menos un bolo de cristaloides previo"),
+        ("source_control","Activar control del foco","Requiere hemocultivos y antibiótico ya administrados"),
     ],
     "reassess": [
         ("reassess","Reevaluar respuesta","Integra tendencia fisiológica y clínica"),
         ("recheck_lactate","Revisar tendencia de lactato","Comprueba respuesta metabólica"),
         ("recheck_map","Revisar PAM","Determina si persiste inestabilidad"),
+    ],
+    "emergency": [
+        ("cpr","Iniciar RCP","Compresiones torácicas de alta calidad · solo durante el paro"),
+        ("epinephrine","Adrenalina IV","Cada ciclo de RCP · solo durante el paro"),
     ],
 }
 
@@ -165,7 +169,26 @@ def start_session():
         "phase": "Establecimiento inicial",
         "completed": False,
         "case_status": "en_curso",
+        # ── Prerrequisitos del bundle (dependencias clínicas reales) ──
+        "iv_access": False,
+        "cultures_done": False,
+        "antibiotic_given": False,
+        "fluids_count": 0,
+        "vasopressor_started": False,
         "source_control_done": False,
+        "deviations_log": [],
+        "action_counts": {},
+        "last_action_time": {},
+        "last_coach_at": -999,
+        # ── Desenlace real ──
+        "critical_seconds": 0.0,
+        "arrest": False,
+        "arrest_started_at": None,
+        "cpr_active": False,
+        "epinephrine_count": 0,
+        "rosc": False,
+        "rosc_achieved_at": None,
+        "outcome_locked": None,
         "consciousness": consciousness_level(SCENARIO["initial_physiology"]["map"]),
         "streak": 0,
     }
@@ -192,27 +215,177 @@ def speed_tag(elapsed):
     return "Respuesta tardía"
 
 
+def generate_coach_message(state):
+    """Narración proactiva del preceptor virtual: no depende de que el
+    usuario haga clic en algo. Se sondea periódicamente desde el frontend y
+    ofrece orientación o refuerzo positivo según el progreso real del
+    bundle, con un tono de estímulo (no solo correctivo)."""
+    now = state["elapsed_seconds"]
+    last = state.get("last_coach_at", -999)
+    if now - last < 22:
+        return None
+    phys = state["physiology"]
+    candidates = []
+    if not state["iv_access"]:
+        candidates.append(("Antes de cualquier fármaco o líquido, asegura un acceso vascular: es la puerta de entrada al resto del bundle.", "Enfermería"))
+    elif state["iv_access"] and not state["cultures_done"] and not state["antibiotic_given"]:
+        candidates.append(("Buen paso con el acceso IV. Ahora toma los hemocultivos antes del antibiótico, si el tiempo lo permite.", "Equipo"))
+    elif state["cultures_done"] and not state["antibiotic_given"]:
+        candidates.append(("Cultivos en camino: es un buen momento para iniciar el antibiótico de amplio espectro.", "Laboratorio"))
+    elif state["antibiotic_given"] and not state["cultures_done"]:
+        candidates.append(("El antibiótico ya está en marcha; en un caso real, documenta que los cultivos no se alcanzaron a tomar antes.", "Equipo"))
+    elif state["antibiotic_given"] and phys["map"] < 65 and state["fluids_count"] == 0:
+        candidates.append(("La presión arterial sigue baja: valora iniciar cristaloides ahora.", "Monitor"))
+    elif state["fluids_count"] > 0 and phys["map"] < 65 and not state["vasopressor_started"]:
+        candidates.append(("A pesar del volumen administrado, la PAM continúa baja: considera iniciar soporte vasoactivo.", "Enfermería"))
+    elif state["antibiotic_given"] and state["cultures_done"] and not state["source_control_done"]:
+        candidates.append(("Con cultivos y antibiótico ya en marcha, evalúa si es momento de activar el control definitivo del foco.", "Equipo"))
+    elif phys["map"] >= 65 and state["source_control_done"]:
+        candidates.append(("Buen manejo: los parámetros se estabilizan y el foco está controlado. Sigue reevaluando la tendencia.", "Equipo"))
+    elif phys["map"] >= 65 and phys["lactate"] > 3:
+        candidates.append(("La presión ya responde; sigue de cerca la tendencia del lactato antes de dar el caso por resuelto.", "Laboratorio"))
+    if not candidates:
+        return None
+    text, source = candidates[0]
+    state["last_coach_at"] = now
+    return {"text": text, "voice_source": source}
+
+
 def evaluate_case(state):
     """Determina si el caso simulado cumple criterios (educativos) de cierre
     o si, por el contrario, la inestabilidad exige escalamiento.
 
+    El cierre favorable exige el bundle completo (hemocultivos, antibiótico
+    y control del foco), no solo metas hemodinámicas: en la práctica real,
+    la PAM puede normalizarse transitoriamente sin que la fuente de la
+    infección esté resuelta ni el tratamiento antimicrobiano adecuado se
+    haya iniciado correctamente.
+
     Devuelve (status, mensaje) donde status es uno de:
       - "en_curso": el caso continúa sin un hito relevante.
-      - "listo_para_cierre": parámetros estables y foco controlado.
+      - "listo_para_cierre": parámetros estables y bundle completo.
       - "escalamiento_requerido": inestabilidad persistente y prolongada.
+      - "paro_cardiorrespiratorio": la paciente está en paro (sin pulso).
+      - "desenlace_adverso": paro sostenido sin retorno de circulación.
     """
+    if state.get("outcome_locked"):
+        return "desenlace_adverso", "El caso se cierra con desenlace adverso tras paro cardiorrespiratorio sin retorno de circulación espontánea."
+    if state.get("arrest"):
+        return "paro_cardiorrespiratorio", "La paciente está en paro cardiorrespiratorio: prioriza RCP y adrenalina."
     phys = state["physiology"]
-    # 3.0 mmol/L es alcanzable con el piso fisiológico que produce la acción
-    # "source_control" (2.8) en este motor educativo; sirve como umbral de
-    # tendencia favorable sin exigir un valor inalcanzable dentro del juego.
-    stable = phys.get("map", 0) >= 65 and phys.get("lactate", 99) <= 3.0
-    source_controlled = state.get("source_control_done", False)
+    hemodinamica_estable = phys.get("map", 0) >= 65 and phys.get("lactate", 99) <= 3.0
+    bundle_completo = (
+        state.get("cultures_done", False)
+        and state.get("antibiotic_given", False)
+        and state.get("source_control_done", False)
+    )
     prolonged_instability = phys.get("map", 999) < 55 and state["elapsed_seconds"] > 240
-    if stable and source_controlled:
-        return "listo_para_cierre", "Parámetros estables y foco controlado: el caso cumple criterios educativos para cierre."
+    if hemodinamica_estable and bundle_completo:
+        return "listo_para_cierre", "Parámetros estables, bundle completo (cultivos, antibiótico y control del foco): el caso cumple criterios educativos para cierre."
     if prolonged_instability:
         return "escalamiento_requerido", "Persiste la inestabilidad y el equipo debe escalar."
     return "en_curso", ""
+
+
+FLUID_BOLUS_ML = 500          # mL por cada bolo de cristaloides en la simulación
+TARGET_ML_KG = 30             # meta orientativa de 30 mL/kg (SSC 2021)
+REASSESS_MIN_INTERVAL_S = 20  # evita puntuar reevaluaciones repetidas sin datos nuevos
+
+# ── Desenlace real: paro cardiorrespiratorio / ROSC / estabilización ──
+CRITICAL_MAP = 40                 # PAM por debajo de la cual se acumula "tiempo crítico"
+ARREST_TRIGGER_SECONDS = 90       # tiempo crítico acumulado (simulado) antes del paro
+ARREST_SURVIVABLE_SECONDS = 180   # ventana para lograr RCE antes del desenlace adverso
+ROSC_EPI_DOSES_NEEDED = 2         # dosis de adrenalina (con RCP en curso) para intentar RCE
+
+
+def _peso_paciente():
+    return (SCENARIO.get("patient") or {}).get("peso") or 70
+
+
+def trigger_arrest(state):
+    """Dispara el paro cardiorrespiratorio simulado: la paciente deja de
+    responder y pierde el pulso. Devuelve la secuencia de alertas/voz que
+    dramatiza el evento (enfermería que llama, equipo que confirma ausencia
+    de pulso, monitor que registra asistolia)."""
+    state["arrest"] = True
+    state["arrest_started_at"] = state["elapsed_seconds"]
+    state["cpr_active"] = False
+    phys = state["physiology"]
+    phys["map"] = 0
+    phys["bpSys"] = 0
+    phys["bpDia"] = 0
+    phys["fc"] = 0
+    phys["spo2"] = max(0, phys["spo2"] - 20)
+    return [
+        {"type": "arrest", "title": "Sin respuesta", "text": "¡No responde! ¡No responde! Enfermería llama al equipo.", "voice_source": "Enfermería"},
+        {"type": "arrest", "title": "Sin pulso", "text": "No se palpa pulso. Inicien compresiones torácicas de inmediato.", "voice_source": "Equipo"},
+        {"type": "arrest", "title": "Asistolia", "text": "El monitor registra asistolia: línea plana, sin actividad eléctrica organizada.", "voice_source": "Monitor"},
+    ]
+
+
+def achieve_rosc(state):
+    """Retorno de circulación espontánea tras RCP + adrenalina oportunas."""
+    state["arrest"] = False
+    state["rosc"] = True
+    state["rosc_achieved_at"] = state["elapsed_seconds"]
+    state["cpr_active"] = False
+    state["critical_seconds"] = 0.0
+    phys = state["physiology"]
+    phys["map"] = 55
+    phys["bpSys"] = 88
+    phys["bpDia"] = 52
+    phys["fc"] = 108
+    phys["spo2"] = 90
+    phys["lactate"] = round(phys["lactate"] + 1.2, 1)  # el paro empeora la perfusión tisular
+    return [
+        {"type": "rosc", "title": "Retorno de circulación", "text": "Recupera pulso palpable. Retorno de circulación espontánea.", "voice_source": "Monitor"},
+        {"type": "rosc", "title": "RCE lograda", "text": "Buen trabajo del equipo: la paciente recupera pulso, aunque queda muy inestable y requiere vigilancia estrecha.", "voice_source": "Equipo"},
+    ]
+
+
+def advance_critical_clock(state, elapsed):
+    """Avanza el 'reloj crítico' de forma independiente a que el usuario
+    actúe: si la paciente permanece inestable, el cuadro empeora
+    gradualmente con el tiempo (no se congela) — igual que en la vida real,
+    el abandono terapéutico tiene consecuencias. Si la PAM permanece
+    crítica el tiempo suficiente, el paro puede ocurrir aunque nadie haga
+    clic en nada. Se invoca tanto tras cada acción como desde el sondeo
+    periódico del coach."""
+    if state.get("arrest") or state.get("outcome_locked"):
+        return []
+    phys = state["physiology"]
+    if phys["map"] < 65:
+        # Cuanto más grave la hipotensión, más rápido se deteriora si no se
+        # corrige — sin piso artificial que impida llegar al paro.
+        severity = max(0.0, 65 - phys["map"]) / 65
+        drift = elapsed * (0.04 + severity * 0.12)
+        phys["map"] = max(0.0, phys["map"] - drift)
+        phys["lactate"] = round(min(12.0, phys["lactate"] + elapsed * 0.01 * (1 + severity)), 1)
+        if phys["spo2"] < 92:
+            phys["spo2"] = max(50.0, phys["spo2"] - elapsed * 0.02)
+    if phys["map"] < CRITICAL_MAP:
+        state["critical_seconds"] = state.get("critical_seconds", 0.0) + elapsed
+    else:
+        state["critical_seconds"] = max(0.0, state.get("critical_seconds", 0.0) - elapsed * 0.5)
+    if state["critical_seconds"] >= ARREST_TRIGGER_SECONDS:
+        return trigger_arrest(state)
+    return []
+
+
+def check_arrest_outcome(state):
+    """Si el paro se sostiene más allá de la ventana simulada sin lograr
+    RCE, se declara el desenlace adverso y se cierra el caso."""
+    if not state.get("arrest") or state.get("outcome_locked"):
+        return []
+    since_arrest = state["elapsed_seconds"] - (state.get("arrest_started_at") or 0)
+    if since_arrest >= ARREST_SURVIVABLE_SECONDS:
+        state["outcome_locked"] = "paro_sin_rce"
+        state["case_status"] = "desenlace_adverso"
+        state["completed"] = True
+        return [{"type": "case_end", "title": "Desenlace",
+                  "text": "A pesar de las maniobras, no se logra retorno de circulación espontánea. Se declara el desenlace adverso de este caso simulado.",
+                  "voice_source": "Equipo"}]
+    return []
 
 
 def apply_action(state, action_id, elapsed):
@@ -223,69 +396,257 @@ def apply_action(state, action_id, elapsed):
     score = 0
     feedback = ""
     observation = ""
+    deviation = None
+    special_alerts = []
     is_request = action_id.startswith("request_")
 
-    if is_request:
+    counts = state.setdefault("action_counts", {})
+    prev_count = counts.get(action_id, 0)
+    counts[action_id] = prev_count + 1
+    peso = _peso_paciente()
+
+    if state.get("arrest") and action_id not in ("cpr", "epinephrine"):
+        good = False; score = 0
+        feedback = "La paciente está en paro cardiorrespiratorio: ninguna otra intervención es válida ahora."
+        observation = "Prioriza RCP de alta calidad y adrenalina antes que cualquier otra acción del bundle."
+
+    elif is_request:
         key = action_id.replace("request_", "")
         if key in SCENARIO["available_tests"]:
             info = SCENARIO["available_tests"][key]
-            if key not in state["requested_information"]:
+            already = key in state["requested_information"]
+            if not already:
                 state["requested_information"].append(key)
-            state["score"] += 1
-            score = 1
-            feedback = f"Información obtenida: {info['result']}."
+                score = 1
+                feedback = f"Información obtenida: {info['result']}."
+            else:
+                feedback = f"Ya cuentas con este resultado: {info['result']}."
             observation = info["detail"]
+            if key == "cultures":
+                state["cultures_done"] = True
         else:
             good = False
             feedback = "Solicitud no reconocida."
 
     elif action_id == "oxygen":
-        state["physiology"]["spo2"] = min(97, state["physiology"]["spo2"] + 6); score=1
-        feedback="La oxigenación mejora en la simulación."; observation="La SpO₂ asciende, pero la inestabilidad hemodinámica persiste."
-    elif action_id == "iv":
-        score=1; feedback="Acceso vascular conseguido."; observation="Ahora puedes obtener muestras y administrar tratamientos."
-    elif action_id == "antibiotic":
-        state["physiology"]["lactate"] = round(max(3.8, state["physiology"]["lactate"]-0.25),1); state["physiology"]["fc"] -= 4; score=2
-        feedback="Tratamiento antimicrobiano administrado en la simulación."; observation="La respuesta es gradual; todavía requiere soporte y reevaluación."
-    elif action_id == "fluids":
-        state["physiology"]["map"] += 6; state["physiology"]["bpSys"] += 8; state["physiology"]["bpDia"] += 4; state["physiology"]["lactate"] = round(max(4.0, state["physiology"]["lactate"]-0.4),1); score=2
-        feedback="La PAM mejora parcialmente con la intervención."; observation="La respuesta es incompleta: continúa la necesidad de reevaluación."
-    elif action_id == "vasopressor":
-        if state["physiology"]["map"] < 65:
-            state["physiology"]["map"] += 12; state["physiology"]["bpSys"] += 12; state["physiology"]["bpDia"] += 5; score=3
-            feedback="La PAM mejora con soporte vasoactivo."; observation="La perfusión mejora, pero el foco y la tendencia del lactato deben seguirse."
+        if state["physiology"]["spo2"] >= 94:
+            feedback = "La saturación ya es adecuada; el oxígeno adicional no aporta más en este momento."
+            observation = "Evita intervenciones sin indicación clara; prioriza otra acción del algoritmo."
         else:
-            score=1; feedback="Soporte vasoactivo aplicado con PAM ya mejorada."; observation="La simulación recomienda seguir reevaluando el estado global."
+            gain = max(1, 6 - prev_count * 2)
+            state["physiology"]["spo2"] = min(97, state["physiology"]["spo2"] + gain)
+            score = 1
+            feedback = "La oxigenación mejora con soporte suplementario."
+            observation = "La SpO₂ asciende, pero la inestabilidad hemodinámica persiste."
+
+    elif action_id == "iv":
+        if state["iv_access"]:
+            feedback = "El acceso vascular ya estaba disponible."
+        else:
+            state["iv_access"] = True
+            score = 1
+            feedback = "Acceso vascular conseguido."
+        observation = "El acceso IV es prerrequisito real para administrar antibióticos, cristaloides y vasopresores."
+
+    elif action_id == "antibiotic":
+        if not state["iv_access"]:
+            good = False; score = -2
+            feedback = "No es correcto: no se puede administrar el antibiótico sin acceso vascular."
+            observation = "Obtén un acceso IV antes de iniciar cualquier tratamiento endovenoso."
+            deviation = "Se intentó administrar antibiótico sin acceso IV disponible."
+        elif state["antibiotic_given"]:
+            feedback = "Ya se había iniciado el antimicrobiano; no se repite dosis en la simulación."
+            observation = "Prioriza otra acción del bundle."
+        else:
+            if not state["cultures_done"]:
+                good = False; score = -1
+                # Beneficio reducido: al no tener cultivos previos se pierde
+                # rendimiento diagnóstico y no puede considerarse una decisión
+                # oportuna, aunque el fármaco sí se administre.
+                state["physiology"]["lactate"] = round(max(4.2, state["physiology"]["lactate"] - 0.1), 1)
+                state["physiology"]["fc"] -= 1
+                feedback = "No es correcto todavía: se administró antibiótico SIN hemocultivos previos (desviación del bundle de 1 hora)."
+                observation = "El bundle SSC exige tomar hemocultivos ANTES de iniciar antibióticos, cuando no retrasa la terapia. El efecto terapéutico es menor sin diagnóstico microbiológico."
+                deviation = "Antibiótico administrado sin hemocultivos previos."
+            else:
+                score = 2
+                state["physiology"]["lactate"] = round(max(3.8, state["physiology"]["lactate"] - 0.25), 1)
+                state["physiology"]["fc"] -= 4
+                feedback = "Antibiótico de amplio espectro administrado en el momento oportuno del bundle."
+                observation = "La respuesta es gradual; todavía requiere soporte y reevaluación."
+            state["antibiotic_given"] = True
+
+    elif action_id == "fluids":
+        if not state["iv_access"]:
+            good = False; score = -2
+            feedback = "No es correcto: no se pueden iniciar cristaloides sin acceso vascular."
+            observation = "Obtén un acceso IV antes de iniciar líquidos."
+            deviation = "Se intentaron cristaloides sin acceso IV disponible."
+        else:
+            ml_previo = state["fluids_count"] * FLUID_BOLUS_ML
+            mlkg_previo = ml_previo / peso
+            if mlkg_previo >= TARGET_ML_KG and state["physiology"]["map"] >= 65:
+                good = False; score = -2
+                state["physiology"]["spo2"] = max(85, state["physiology"]["spo2"] - 2)
+                state["physiology"]["rr"] += 2
+                state["physiology"]["fc"] += 4
+                feedback = "No es correcto: volumen adicional sin indicación, con la PAM ya en meta."
+                observation = f"Ya se administraron ≈{ml_previo} mL (≈{mlkg_previo:.0f} mL/kg) y la PAM está en meta: riesgo real de sobrecarga hídrica."
+                deviation = "Cristaloides administrados más allá de la meta de 30 mL/kg sin indicación (riesgo de sobrecarga)."
+            else:
+                state["fluids_count"] += 1
+                gain = max(2, 6 - (state["fluids_count"] - 1))  # respuesta decreciente a boluses repetidos
+                state["physiology"]["map"] += gain
+                state["physiology"]["bpSys"] += round(gain * 1.3)
+                state["physiology"]["bpDia"] += round(gain * 0.7)
+                state["physiology"]["lactate"] = round(max(3.6, state["physiology"]["lactate"] - 0.3), 1)
+                score = 2
+                ml_total = state["fluids_count"] * FLUID_BOLUS_ML
+                feedback = f"Bolo de cristaloides administrado (≈{ml_total} mL acumulados, ≈{ml_total/peso:.0f} mL/kg)."
+                observation = "La respuesta es incompleta: continúa la necesidad de reevaluación."
+
+    elif action_id == "vasopressor":
+        if not state["iv_access"]:
+            good = False; score = -2
+            feedback = "No es correcto: no se puede iniciar vasopresor sin acceso vascular."
+            observation = "Obtén un acceso IV antes de iniciar soporte vasoactivo."
+            deviation = "Se intentó iniciar vasopresor sin acceso IV disponible."
+        else:
+            hipotension_critica = state["physiology"]["map"] < 50
+            if state["fluids_count"] == 0 and not hipotension_critica:
+                good = False; score = -2
+                # Sin beneficio hemodinámico: vasoconstricción sobre un lecho
+                # vascular no repletado no mejora la PAM de forma fiable y
+                # añade riesgo de taquiarritmia. No puede llamarse "correcta".
+                state["physiology"]["fc"] += 6
+                state["vasopressor_started"] = True
+                feedback = "No es correcto todavía: vasopresor iniciado sin ningún bolo de cristaloides previo (intervención prematura, no oportuna)."
+                observation = "La SSC 2021 recomienda iniciar/continuar cristaloides antes o junto con vasopresores, salvo hipotensión crítica refractaria. Sin volumen previo, la respuesta presora es poco fiable y aumenta el riesgo de arritmia."
+                deviation = "Vasopresor iniciado antes de cualquier bolo de cristaloides (sin hipotensión crítica que lo justifique)."
+            else:
+                if state["physiology"]["map"] < 65:
+                    state["physiology"]["map"] += 12
+                    state["physiology"]["bpSys"] += 12
+                    state["physiology"]["bpDia"] += 5
+                    score = 3
+                    feedback = "Norepinefrina iniciada en el momento oportuno: la PAM mejora con soporte vasoactivo."
+                else:
+                    feedback = "Soporte vasoactivo aplicado con la PAM ya en meta; no aporta beneficio adicional."
+                    observation = "Evita escalar vasopresores sin indicación hemodinámica."
+                state["vasopressor_started"] = True
+                observation = observation or "La perfusión mejora, pero el foco y la tendencia del lactato deben seguirse."
+
     elif action_id == "source_control":
-        state["physiology"]["lactate"] = round(max(2.8, state["physiology"]["lactate"]-0.5),1); score=3
-        state["source_control_done"] = True
-        feedback="Se activa el control del foco."; observation="La trayectoria simulada mejora gradualmente si se mantiene la reanimación."
-    elif action_id == "reassess":
-        score=2; feedback="Reevaluación realizada."; observation="Compara PAM, SpO₂, estado mental y tendencia del lactato antes de la siguiente acción."
-    elif action_id == "recheck_lactate":
-        score=2; state["requested_information"].append("lactate_trend") if "lactate_trend" not in state["requested_information"] else None
-        feedback=f"Lactato actual: {state['physiology']['lactate']:.1f} mmol/L."; observation="Una tendencia es más útil que un valor aislado para la discusión del caso."
-    elif action_id == "recheck_map":
-        score=2; feedback=f"PAM actual: {state['physiology']['map']} mmHg."; observation="Valora esta cifra junto con perfusión y respuesta global."
-    elif action_id == "assess_airway":
-        score=1; feedback="Vía aérea evaluada."; observation="La vía aérea está patente en este escenario, pero la paciente presenta alteración del estado mental."
-    elif action_id == "assess_breathing":
-        score=1; feedback="Respiración evaluada."; observation="Taquipnea e hipoxemia requieren soporte y reevaluación."
-    elif action_id == "assess_perfusion":
-        score=2; feedback="Perfusión evaluada."; observation="La hipotensión y la alteración del estado mental sugieren hipoperfusión."
+        if not state["iv_access"]:
+            good = False; score = -2
+            feedback = "No es correcto controlar el foco todavía: no hay acceso vascular ni tratamiento en marcha."
+            observation = "El control del foco requiere primero acceso IV, hemocultivos y antibiótico administrados."
+            deviation = "Se intentó el control del foco sin acceso IV (ningún paso previo del bundle se había completado)."
+        elif not (state["cultures_done"] and state["antibiotic_given"]):
+            good = False; score = -1
+            faltan = []
+            if not state["cultures_done"]:
+                faltan.append("hemocultivos")
+            if not state["antibiotic_given"]:
+                faltan.append("antibiótico")
+            feedback = f"No es correcto todavía: falta completar {', '.join(faltan)} antes del control del foco."
+            observation = "Reconoce y trata primero la infección (cultivos + antibiótico) antes de un control definitivo del foco."
+            deviation = "Se intentó el control del foco antes de completar el reconocimiento diagnóstico/terapéutico inicial."
+        elif state["source_control_done"]:
+            feedback = "El control del foco ya se había activado."
+        else:
+            state["physiology"]["lactate"] = round(max(2.8, state["physiology"]["lactate"] - 0.5), 1)
+            score = 3
+            state["source_control_done"] = True
+            feedback = "Control del foco activado en el momento oportuno del bundle."
+            observation = "La trayectoria simulada mejora gradualmente si se mantiene la reanimación."
+
+    elif action_id in ("reassess", "recheck_lactate", "recheck_map"):
+        last_t = state["last_action_time"].get(action_id)
+        now_t = state["elapsed_seconds"]
+        if last_t is not None and (now_t - last_t) < REASSESS_MIN_INTERVAL_S:
+            feedback = "Reevaluación repetida en un intervalo muy corto; todavía no hay información nueva."
+            observation = "Espera a que la situación cambie antes de reevaluar de nuevo."
+        else:
+            score = 2
+            if action_id == "recheck_lactate":
+                feedback = f"Lactato actual: {state['physiology']['lactate']:.1f} mmol/L."
+            elif action_id == "recheck_map":
+                feedback = f"PAM actual: {state['physiology']['map']} mmHg."
+            else:
+                feedback = "Reevaluación realizada: integra tendencia fisiológica y clínica."
+            observation = "Compara con la evaluación previa antes de decidir la siguiente acción."
+        state["last_action_time"][action_id] = now_t
+
+    elif action_id in ("assess_airway", "assess_breathing", "assess_perfusion"):
+        labels = {
+            "assess_airway": ("Vía aérea evaluada.", "La vía aérea está patente en este escenario, pero la paciente presenta alteración del estado mental."),
+            "assess_breathing": ("Respiración evaluada.", "Taquipnea e hipoxemia requieren soporte y reevaluación."),
+            "assess_perfusion": ("Perfusión evaluada.", "La hipotensión y la alteración del estado mental sugieren hipoperfusión."),
+        }
+        fb, obs = labels[action_id]
+        if prev_count == 0:
+            score = 2 if action_id == "assess_perfusion" else 1
+            feedback = fb
+        else:
+            feedback = "Ya evaluado recientemente; prioriza otra acción del algoritmo."
+        observation = obs
+
     elif action_id == "vitals":
-        score=1; feedback="Signos vitales actualizados."; observation="Observa la tendencia, no solo un valor puntual."
+        if prev_count == 0:
+            score = 1
+            feedback = "Signos vitales actualizados."
+        else:
+            feedback = "Ya revisaste el monitor recientemente; prioriza otra acción."
+        observation = "Observa la tendencia, no solo un valor puntual."
+
+    elif action_id == "cpr":
+        if not state.get("arrest"):
+            good = False; score = 0
+            feedback = "No hay indicación de RCP: la paciente tiene pulso."
+            observation = "Reserva las compresiones torácicas para un paro cardiorrespiratorio real."
+        else:
+            state["cpr_active"] = True
+            score = 2
+            feedback = "Compresiones torácicas de alta calidad en curso."
+            observation = "Mantén el RCP casi sin interrupciones; permite una dosis de adrenalina cada ciclo."
+
+    elif action_id == "epinephrine":
+        if not state.get("arrest"):
+            good = False; score = 0
+            feedback = "No hay indicación de adrenalina: la paciente tiene pulso."
+            observation = "La adrenalina se reserva para el paro cardiorrespiratorio."
+        elif not state.get("cpr_active"):
+            good = False; score = -1
+            feedback = "Antes de la adrenalina, inicia compresiones torácicas de alta calidad."
+            observation = "El RCP sostiene una perfusión mínima mientras actúa el fármaco."
+        else:
+            state["epinephrine_count"] += 1
+            score = 2
+            feedback = f"Adrenalina IV administrada (dosis {state['epinephrine_count']})."
+            observation = "Continúa el RCP; en un paro real se repite cada 3–5 minutos."
+            if state["epinephrine_count"] >= ROSC_EPI_DOSES_NEEDED:
+                special_alerts += achieve_rosc(state)
+                feedback += " Se logra retorno de circulación espontánea."
+
     else:
-        good=False; score=-1; state["delay_minutes"] += 2; feedback="La acción no aporta a la prioridad actual."; observation="El tiempo continúa y debes reevaluar."
+        good = False; score = -1; state["delay_minutes"] += 2
+        feedback = "La acción no aporta a la prioridad actual."
+        observation = "El tiempo continúa y debes reevaluar."
+
+    if deviation:
+        state.setdefault("deviations_log", []).append(deviation)
 
     state["score"] += score
     # Deterioro temporal educativo si se acumula retraso sin soporte hemodinámico.
-    if elapsed >= 30 and action_id not in {"reassess","recheck_lactate","recheck_map","vasopressor"}:
-        state["physiology"]["map"] = max(44, state["physiology"]["map"]-3)
+    if not state.get("arrest") and elapsed >= 30 and action_id not in {"reassess","recheck_lactate","recheck_map","vasopressor","fluids","antibiotic","iv"}:
+        state["physiology"]["map"] = max(0, state["physiology"]["map"]-3)
         state["physiology"]["lactate"] = round(state["physiology"]["lactate"]+0.2,1)
         state["delay_minutes"] += 1
         observation += " El tiempo acumulado introduce un pequeño deterioro educativo simulado."
-    if state["physiology"]["map"] >= 65:
+    if state.get("arrest"):
+        state["phase"] = "Paro cardiorrespiratorio"
+    elif state["physiology"]["map"] >= 65:
         state["phase"] = "Respuesta hemodinámica parcial"
     else:
         state["phase"] = "Inestabilidad persistente"
@@ -295,6 +656,12 @@ def apply_action(state, action_id, elapsed):
     feedback = f"{feedback} {tag}.".strip()
 
     alerts = []
+    alerts += special_alerts
+
+    # Avanza el reloj crítico (puede disparar el paro) y revisa si el paro
+    # sostenido sin RCE debe cerrar el caso con desenlace adverso.
+    alerts += advance_critical_clock(state, elapsed)
+    alerts += check_arrest_outcome(state)
 
     # Racha de decisiones productivas: refuerzo positivo cada 3 aciertos seguidos.
     if score > 0 and good:
@@ -305,6 +672,11 @@ def apply_action(state, action_id, elapsed):
         alerts.append({"type": "encouragement", "title": "Buen manejo",
                         "text": "La secuencia de decisiones sigue el bundle recomendado.",
                         "voice_source": "Equipo"})
+
+    # Anuncia en voz alta las desviaciones del protocolo (refuerzo educativo).
+    if deviation:
+        alerts.append({"type": "deviation", "title": "Desviación del protocolo",
+                        "text": deviation, "voice_source": "Equipo"})
 
     # Cambio de estado de conciencia: se anuncia solo cuando cambia realmente.
     new_consciousness = consciousness_level(state["physiology"]["map"])
@@ -320,7 +692,7 @@ def apply_action(state, action_id, elapsed):
     previous_status = state.get("case_status", "en_curso")
     new_status, status_message = evaluate_case(state)
     state["case_status"] = new_status
-    if new_status != previous_status and new_status != "en_curso":
+    if new_status != previous_status and new_status not in ("en_curso", "paro_cardiorrespiratorio", "desenlace_adverso"):
         if new_status == "escalamiento_requerido":
             alerts.append({"type": "deterioration", "title": "Deterioro", "text": status_message, "voice_source": "Enfermería"})
         elif new_status == "listo_para_cierre":
@@ -329,7 +701,9 @@ def apply_action(state, action_id, elapsed):
     return {
         "before": before, "after": state["physiology"], "good": good, "score": score,
         "feedback": feedback, "observation": observation, "alerts": alerts,
-        "consciousness": state["consciousness"],
+        "consciousness": state["consciousness"], "deviation": deviation,
+        "arrest": state.get("arrest", False), "rosc": state.get("rosc", False),
+        "cpr_active": state.get("cpr_active", False),
     }
 
 
@@ -396,7 +770,7 @@ class Handler(BaseHTTPRequestHandler):
                 state["decisions"].append(decision)
                 result={"good":r["good"],"feedback":r["feedback"],"observation":r["observation"],"physiology":r["after"],
                         "score_delta":r["score"],"case_status":state["case_status"],"consciousness":r["consciousness"],
-                        "alerts":r["alerts"]}
+                        "alerts":r["alerts"],"arrest":r["arrest"],"rosc":r["rosc"],"cpr_active":r["cpr_active"]}
                 self.send_data(200,json.dumps({"result":result,"state":state},ensure_ascii=False)); return
             if path=="/api/session/event":
                 sid=body.get("session_id"); state=SESSIONS.get(sid)
@@ -417,6 +791,16 @@ class Handler(BaseHTTPRequestHandler):
                 sid=body.get("session_id"); state=SESSIONS.get(sid)
                 if not state: self.send_data(404,json.dumps({"error":"Sesión no encontrada"})); return
                 state["completed"]=True; state["finished_at"]=datetime.now().isoformat(); self.send_data(200,json.dumps({"state":state,"debrief":build_debrief(state)},ensure_ascii=False)); return
+            if path=="/api/session/coach":
+                sid=body.get("session_id"); state=SESSIONS.get(sid)
+                if not state: self.send_data(404,json.dumps({"error":"Sesión no encontrada"})); return
+                elapsed=max(0.0, float(body.get("elapsed_seconds",15)))
+                state["elapsed_seconds"] += elapsed
+                alerts=advance_critical_clock(state, elapsed) + check_arrest_outcome(state)
+                msg=generate_coach_message(state) if not state.get("arrest") else None
+                self.send_data(200,json.dumps({"message":msg,"alerts":alerts,"arrest":state.get("arrest",False),
+                                                "rosc":state.get("rosc",False),"case_status":state.get("case_status"),
+                                                "physiology":state["physiology"]},ensure_ascii=False)); return
             self.send_data(404,json.dumps({"error":"Ruta no encontrada"}))
         except Exception as exc: self.send_data(400,json.dumps({"error":str(exc)},ensure_ascii=False))
     def log_message(self, fmt,*args): print(fmt%args)
@@ -426,20 +810,53 @@ def build_debrief(state):
     decisions=state["decisions"]; bad=sum(1 for d in decisions if d["score"]<0); good=sum(1 for d in decisions if d["score"]>0)
     status, message = evaluate_case(state)
     state["case_status"] = status
-    if status == "listo_para_cierre":
+    deviations_log = state.get("deviations_log", [])
+    arrest_occurred = state.get("arrest", False) or state.get("rosc", False) or bool(state.get("outcome_locked"))
+    rosc_achieved = state.get("rosc", False)
+    if status == "desenlace_adverso":
+        outcome = "Adverso"
+        narrative = message or "El caso se cierra con desenlace adverso: paro cardiorrespiratorio sostenido sin retorno de circulación espontánea, a pesar de las maniobras de reanimación."
+    elif status == "paro_cardiorrespiratorio":
+        outcome = "Crítico"
+        narrative = "El caso se cierra con la paciente aún en paro cardiorrespiratorio: continúa el RCP y la adrenalina, o deja que la simulación avance para ver el desenlace."
+    elif status == "listo_para_cierre":
         outcome = "Favorable"
         narrative = message or "El caso se cierra con respuesta hemodinámica sostenida y control del foco infeccioso."
+        if rosc_achieved:
+            narrative += " La paciente logró retorno de circulación espontánea tras el paro y, aun así, alcanzó estabilización — un desenlace favorable poco frecuente que refleja un manejo de emergencia oportuno."
     elif status == "escalamiento_requerido":
         outcome = "Adverso"
         narrative = "El caso se cierra con inestabilidad persistente; en un entorno real correspondería activar escalamiento y soporte avanzado."
     else:
         outcome = "Incompleto"
-        narrative = "El caso se cierra sin alcanzar criterios claros de estabilización; conviene revisar tiempos del bundle y la secuencia de reevaluación."
+        faltantes = []
+        if not state.get("cultures_done"): faltantes.append("hemocultivos")
+        if not state.get("antibiotic_given"): faltantes.append("antibiótico de amplio espectro")
+        if not state.get("source_control_done"): faltantes.append("control del foco")
+        if faltantes:
+            narrative = f"El caso se cierra sin completar el bundle: falta {', '.join(faltantes)}. Revisa la secuencia y los tiempos del protocolo."
+        else:
+            narrative = "El caso se cierra sin alcanzar criterios claros de estabilización; conviene revisar tiempos del bundle y la secuencia de reevaluación."
+        if rosc_achieved:
+            narrative += " La paciente logró retorno de circulación espontánea tras un paro cardiorrespiratorio, pero el caso no alcanzó una estabilización completa."
+    if deviations_log:
+        narrative += f" Se registraron {len(deviations_log)} desviación(es) del protocolo durante el caso."
     return {
         "total_decisions":len(decisions),"productive":good,"deviations":bad,"score":state["score"],
         "delay_minutes":state["delay_minutes"],"elapsed_seconds":round(state["elapsed_seconds"],1),
         "physiology":state["physiology"],"events":state["events_seen"],
         "case_status":status,"outcome":outcome,"closure_narrative":narrative,
+        "protocol_deviations":deviations_log,
+        "arrest_occurred":arrest_occurred,"rosc_achieved":rosc_achieved,
+        "epinephrine_doses":state.get("epinephrine_count",0),
+        "bundle_status":{
+            "iv_access":state.get("iv_access",False),
+            "cultures_done":state.get("cultures_done",False),
+            "antibiotic_given":state.get("antibiotic_given",False),
+            "fluids_ml":state.get("fluids_count",0)*FLUID_BOLUS_ML,
+            "vasopressor_started":state.get("vasopressor_started",False),
+            "source_control_done":state.get("source_control_done",False),
+        },
     }
 
 
